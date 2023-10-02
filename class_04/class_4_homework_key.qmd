@@ -168,7 +168,7 @@ We already have a date of death in our cohort table - but we'd want to be able t
 SELECT patient, diagnosis_date, deathdate, 
 CASE WHEN DATE_PART('day', deathdate - diagnosis_date) BETWEEN 0 AND 30 THEN true ELSE false END AS covid_mortality
 FROM covid_cohort_tmp
-
+LIMIT 20
 ```
 
 Lets find all the hospitalizations that occured -3 - 14 days after a diagnosis.
@@ -182,6 +182,7 @@ INNER JOIN encounters
   ON encounters.patient = covid_cohort_tmp.patient
   AND encounterclass = 'inpatient'
   AND DATE_PART('day', encounters.start - diagnosis_date) BETWEEN -3 AND 14  
+LIMIT 20
 ```
 
 The code in `procedures` for intubation, ie placing a tube in the trachea in preparation to place someone on a ventilator, is 112798008 ("Insertion of endotracheal tube (procedure)"). But its also possible that they were intubated more than once - people could be intubated, extubated, get sick again and intubated again all in one encounter. So we need to make sure we only get one row back. One way to do this is just to get the first date of intubation for each patient.
@@ -197,5 +198,6 @@ INNER JOIN procedures
   ON procedures.encounter = encounters.id 
   AND procedures.code = '112798008'
 GROUP BY covid_cohort_tmp.patient
+LIMIT 20
 ```
 
