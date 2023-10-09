@@ -81,3 +81,25 @@ Now we can use that temp table directly:
 SELECT * FROM COVIDCohort LIMIT 5
 
 ```
+
+Since past years the list of medications has gotten a lot more complex - I've pulled them for you here:
+
+```{sql connection=con}
+WITH asthma_meds AS (
+  SELECT 'maintenance' as type, code, description, COUNT(distinct patient) patients
+  FROM medications
+  WHERE
+      -- Maintenance inhalers
+      code in (95996, 349094, 616830, 1998774, 896209, 896006, 966529, 746815, 966524, 1547660, 1998772, 1536144)
+  GROUP BY type, code, description
+  UNION
+  SELECT 'rescue' as type, code, description, COUNT(distinct patient) patients
+  FROM medications
+  WHERE
+      -- Rescue inhalers
+      code in (630208, 859088, 745752, 351137, 351136, 245314, 2123111, 746763)
+  GROUP BY type, code, description
+)
+SELECT * FROM asthma_meds
+ORDER BY type, patients DESC
+```
