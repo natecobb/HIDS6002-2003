@@ -1,5 +1,5 @@
 ---
-title: "Lecture 10 Homework Framework"
+title: "Lecture 7 Homework Framework"
 format: 
   html:
     self-contained: true
@@ -15,7 +15,7 @@ library(keyring)       # access to a local encrypted keychain for passwords
 
 con <- connection_open(RPostgres::Postgres(),
           dbname = "syntheticMGUH",
-          host = "34.85.177.140",
+          host = "35.199.4.72",
           user = "hids502_student",
           password = key_get(service = "syntheticmguh", 
                              username = "hids502_student"),
@@ -47,6 +47,41 @@ Create and return a data set that is fully de-identified.
 
 Build a patient lookup table. Note that we should probably randomize the order of the MRNs to make sure that our new ones and the old ones aren't in synch. This happens naturally here, but normally it would be best practice.
 
+```{sql connection=con}
+-- Example code to demonstrate the use of the functions that we will need!
+
+-- Assume July 1st 2023 is an admission, July 7th is a discharge and Jan 1, 1945 is a birthday
+SELECT MD5('Nathan Cobb'), -- MD5 hash,
+CAST(67956541/1000000 AS INT), -- a psuedo random number
+CAST(RANDOM()*100 AS INT) random_integer, -- a real random numbers
+CAST('1945-01-01' AS DATE) + CAST(RANDOM()*100 AS INT) date_with_offset, -- Add 1 day to a date
+CAST('2023-07-07' AS DATE) - CAST('2023-07-01' AS DATE) , -- Difference in days between dates
+AGE(CAST('2023-07-01' AS DATE), CAST('1945-01-01' AS DATE)), -- Age -- but not in years!!!
+DATE_PART('YEAR', CAST('2023-07-01' AS DATE)), -- Extracting the year from a date
+DATE_PART('YEAR', AGE(CAST('2023-07-01' AS DATE), CAST('1945-01-01' AS DATE))) -- Or from an age
+```
+
+```{sql connection=con}
+-- Constructing a CTE lookup table to create random numbers for each patients.
+-- You will need to join back against this to add the numbers to create a date shift.
+WITH date_shifts_lookup AS (
+  SELECT medical_record_id, 
+  CAST(RANDOM() * 100 AS INT) random_date_offset -- We want an integer number of days
+  FROM inpatientregistry
+  )
+SELECT * from date_shifts_lookup
+```
+
+```{sql connection=con}
+-- Constructing a CTE lookup table to create random numbers for each patients.
+-- You will need to join back against this to add the numbers to create a date shift.
+WITH mrn_lookup AS (
+  SELECT medical_record_id, 
+  row_number() OVER (ORDER BY medical_record_id) AS new_medical_record_id
+  FROM inpatientregistry
+  )
+SELECT * from mrn_lookup
+```
 # Limited Data Set Table
 
 Create and return a data set that is de-identified to HIPAA standards. Technically you can return a date of birth, but generally there is no good reason to do so (unless its a pediatric patient).
