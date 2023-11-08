@@ -65,8 +65,8 @@ WITH possible_matches AS (
 
   AS match_score,
   matches.*
-  FROM pmc.all_patient_records target
-   LEFT JOIN pmc.all_patient_records matches
+  FROM onc_pmc.all_patient_records target
+   LEFT JOIN onc_pmc.all_patient_records matches
    ON 1 = 1
    -- AND matches.enterpriseid <> target.enterpriseid
    -- Use this to just work with a limited set of possible matches
@@ -81,11 +81,14 @@ FROM possible_matches
 WHERE match_score > 3
 ORDER BY match_score DESC
 ```
+
+If you wanted to write this as a loop in R it might look like this:
+
 ```{r}
 library(glue)
 
 eids <- 
-  dbGetQuery(con, "SELECT enterpriseID from pmc.all_patient_records WHERE first = 'JAMES' and last = 'SMITH' LIMIT 100")
+  dbGetQuery(con, "SELECT enterpriseID from onc_pmc.all_patient_records WHERE first = 'JAMES' and last = 'SMITH' LIMIT 100")
 
 sql <- "WITH possible_matches AS (
   SELECT 
@@ -126,8 +129,8 @@ sql <- "WITH possible_matches AS (
 
   AS  match_score, target.enterpriseid,
   matches.*
-  FROM pmc.all_patient_records target
-   LEFT JOIN pmc.all_patient_records matches
+  FROM onc_pmc.all_patient_records target
+   LEFT JOIN onc_pmc.all_patient_records matches
    ON 1 = 1
    AND matches.enterpriseid <> target.enterpriseid
   WHERE 
