@@ -1,0 +1,254 @@
+---
+title: "Class 12 Example"
+author: Nathan Cobb
+format: 
+  html:
+    self-contained: true
+---
+
+```{r setup, include=FALSE}
+#| warning: false
+#| output: false
+library(tidyverse)     # loads the tidyverse tools
+library(RPostgres)     # loads the database driver for PostgreSQL
+library(connections)   # helps RPostgres work with RStudio
+library(keyring)       # access to a local encrypted keychain for passwords
+
+
+con <- connection_open(RPostgres::Postgres(),
+          dbname = "syntheticMGUH",
+          host = "35.199.4.72",
+          user = "hids502_student",
+          password = key_get(service = "syntheticmguh", 
+                             username = "hids502_student"),
+          # Tell the driver to return very large integers as floating point (vs truncating them)
+          bigint = "numeric")
+
+# This is a little function that forces our notes to wrap at 80 characters
+# and then prints them to our Quarto output
+wprint = function(x) {
+  str_replace_all(x, "\n", "\n\n") %>%
+    strwrap() %>%
+    paste0(collapse = "\n") %>% 
+    cat()
+}
+
+```
+
+# Setup
+
+There are a couple of libraries to access the OpenAI API - we will use the one recommended by OpenAI.
+
+```{r}
+#| output: false
+#renv::install("ben-aaron188/rgpt3")
+library(rgpt3)
+library(glue)
+gpt3_authenticate("class_12/access_key.txt")
+```
+
+# Testing
+
+```{r}
+prompt <- "Why did the chicken cross the road?"
+output <- gpt3_single_completion(prompt)
+response <- output[[1]]$gpt3
+
+glue("Question: {prompt} 
+      Answer: {response}")
+```
+```{r}
+patient_note <- dbGetQuery(con, "SELECT patient, date, note_text FROM notes LIMIT 1")
+note_text <- patient_note$note_text
+wprint(note_text)
+```
+
+```{r}
+prompt <- glue("Please turn the following medical note into a Shakespearean sonnet: \n\n {note_text}")
+output <- chatgpt_single(prompt_content = prompt, 
+                         max_tokens = 1000,
+                         model = 'gpt-4-1106-preview')
+response <- output[[1]]$chatgpt_content
+
+cat(response)
+```
+# Tasks
+
+## A single Note
+
+```{r}
+encounter_note <-
+  dbGetQuery(con, "
+            select 
+            providers.name provider_full_name, providers.organization provider_organization,
+            first, last, patients.address, patients.city, patients.state, patients.zip,
+            race, patients.gender, birthdate,
+            encounters.patient, encounters.start, encounterclass, 
+              encounters.description encounter_description, note_text 
+           from patients 
+           left join encounters on 
+              patients.id = encounters.patient
+           left join providers on 
+              encounters.provider = providers.id
+           left join notes on 
+              encounters.patient = notes.patient and encounters.start::date = notes.date
+           where patients.id = '000b85ff-c01a-62c9-1515-14d3a2369a8a' 
+            AND encounters.id = '23ca2b4b-5c9e-71ff-cf4a-0515bbc9e23b'")
+
+```
+
+```{r}
+prompt <- 
+  glue("Please summarize the following physician office note into a letter to the patient named {encounter_note$first} {encounter_note$last} with the address {encounter_note$address}, {encounter_note$city} {encounter_note$state} from Dr. {encounter_note$provider_full_name} using todays date of {Sys.Date()}: \n\n {encounter_note$note_text}")
+
+output <- chatgpt_single(prompt_content = prompt, 
+                         max_tokens = 1000,
+                         # Use a lower "temperature" so we get similar results each time
+                         temperature = 0.2,
+                         model = 'gpt-4-1106-preview')
+response <- output[[1]]$chatgpt_content
+
+wprint(response)
+```
+
+
+```{r}
+prompt <- 
+  glue("In a stepwise fashion, please summarize the following physician office note into a letter to the patient named {encounter_note$first} {encounter_note$last} with the address {encounter_note$address}, {encounter_note$city} {encounter_note$state} from Dr. {encounter_note$provider_full_name} using todays date of {Sys.Date()}, and then translate it into Spanish: \n\n {encounter_note$note_text}")
+
+output <- chatgpt_single(prompt_content = prompt, 
+                         max_tokens = 1000, 
+                         temperature = 0.2,
+                         model = 'gpt-4-1106-preview')
+response <- output[[1]]$chatgpt_content
+
+wprint(response)
+```
+
+
+## Consolidating Notes
+
+A common task is to create summaries of notes.
+
+```{r}
+# Get the last 5 notes for a specific patient
+notes <- 
+dbGetQuery(con, "
+            select 
+            patients.race, patients.gender, patients.birthdate,
+            encounters.patient, encounters.start, encounterclass, 
+              encounters.description encounter_description, note_text 
+           from patients 
+           left join encounters on 
+              patients.id = encounters.patient
+           left join notes on 
+              encounters.patient = notes.patient and encounters.start::date = notes.date
+           where patients.id = '000b85ff-c01a-62c9-1515-14d3a2369a8a' 
+           ORDER by encounters.start desc
+           LIMIT 5
+            ")
+```
+
+Merge those notes together so that they can be sent in a prompt
+
+```{r}
+# Classic way - most languages would do this with a loop
+consolidated_note <- ""
+for (i in 1:nrow(notes)) {
+  consolidated_note <- 
+    glue("{consolidated_note}
+Encounter Date: {notes$start[i]}
+Encounter Type: {notes$encounterclass[i]}
+
+Progress Note:
+{notes$note_text[i]}
+
+-------------------------")
+}
+
+# A more r-like way
+note_template <- "Encounter Date: {start}
+Encounter Type: {encounterclass}
+
+Progress Note:
+{note_text}"
+notes <-
+  mutate(notes, note_text_expanded = glue(note_template))
+consolidated_note <- 
+  paste0(notes$note_text_expanded, collapse = "/n/n---------/n/n")
+```
+
+```{r}
+wprint(consolidated_note)
+```
+
+
+```{r}
+prompt <- glue("Please turn the following medical notes into a summary of the patients course: \n\n {consolidated_note}")
+output <- chatgpt_single(prompt_content = prompt, 
+                         max_tokens = 1000,
+                         model = 'gpt-4-1106-preview')
+response <- output[[1]]$chatgpt_content
+wprint(response)
+```
+
+## Fixing Syntehtic Data
+
+
+### Progress Notes
+
+The Synthea templated notes are terrible. One way to improve them would be to treat them as a data template, feed that to the LLM and ask it to rewrite it. If we did this for the entire database with ChatGPT it would cost about $40k; however we might be able to get reasonable results using a smaller locally hosted LLM like Facebooks LLAMA.
+
+```{r}
+prompt <- 
+  glue("Turn the following information about a patient visit to a physician into a medical progress note: \n\n {encounter_note$note_text}")
+
+output <- chatgpt_single(prompt_content = prompt, 
+                         max_tokens = 1000, 
+                         temperature = 0.2,
+                         model = 'gpt-4-1106-preview')
+response <- output[[1]]$chatgpt_content
+
+wprint(response)
+```
+
+### Imaging Reports
+
+Synthea doesn't have radiology reports - in part because there's not a lot of information to go on. One of our possible tasks was to figure out how to create a synthetic radiology report from available data.
+This is a quick and dirty approach, in reality we'd want to look in the Procedures and Problems associated 
+with this same encounter. Ultimately the LLM will probably hallucinate some of the report given the lack of data, but its as start.
+
+```{r}
+imaging_study <-
+  dbGetQuery(con, "select patients.first, patients.last,
+           imaging_studies.patient,
+           bodysite_description, modality_description,
+           imaging_studies.date as image_date, 
+           note_text
+           from imaging_studies
+           left join notes on 
+               imaging_studies.patient = notes.patient 
+               and imaging_studies.date::date = notes.date::date
+           join patients on 
+               imaging_studies.patient = patients.id
+           where imaging_studies.id = 'd433f5a4-78ed-8329-50ab-0deea72b9976'")
+
+glimpse(imaging_study)
+```
+```{r}
+wprint(imaging_study$note_text)
+```
+
+```{r}
+prompt <- 
+  glue("Create a report from a radiologist on a {imaging_study$modality_description} of the {imaging_study$bodysite_description} of the patient named {imaging_study$first} {imaging_study$last} using the date {imaging_study$image_date}; use the following progress note to determine why the study was ordered and what it might show: /n/n {imaging_study$note_text}")
+
+output <- chatgpt_single(prompt_content = prompt, 
+                         max_tokens = 1000, 
+                         temperature = 0.2,
+                         model = 'gpt-4-1106-preview')
+response <- output[[1]]$chatgpt_content
+
+wprint(response) 
+```
+
